@@ -24,7 +24,7 @@ int main(){
 
         if (strncmp(input, "insert", 6) == 0) {
             Row row;
-            int result = sscanf(input, "insert %d %s %d", &row.id, row.name, &row.age);
+            int result = sscanf(input, "insert %d %63s %d", &row.id, row.name, &row.age);
 
             if (result == 3) {
                 insert_row(db_file, row);
@@ -35,7 +35,7 @@ int main(){
         }else if(strcmp(input, "select") == 0){
             select_all(db_file);
         }else {
-            printf("Unknown Commands");
+            printf("Unknown Commands\n");
         }
     }
     printf("Bye\n");

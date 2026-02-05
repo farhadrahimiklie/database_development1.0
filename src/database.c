@@ -40,46 +40,75 @@ void insert_row(const char* filename, Row row){
     }
 
     DBHeader header;
-    fread(&header, sizeof(DBHeader), 1, ptr);
+
+    if (fread(&header, sizeof(DBHeader), 1, ptr) != 1) {
+        perror("Failed to read DB header");
+        fclose(ptr);
+        exit(1);
+    }
 
     if (header.magic != DB_MAGIC) {
-        printf("Invalid Database file \n");
+        printf("Invalid database file\n");
         fclose(ptr);
         exit(1);
     }
 
     // Calculate total_pages_in_db_file (1 header + N Pages)
-    int total_pages_in_db_file = (header.row_count / (PAGE_SIZE - sizeof(PageHeader)) / sizeof(Page)) + 1;
-
-    // seek to last page
-    fseek(ptr, sizeof(DBHeader) + (total_pages_in_db_file -1) * sizeof(Page), SEEK_SET);
+    int rows_per_page = (PAGE_SIZE - sizeof(PageHeader)) / sizeof(Row);
+    int total_pages = (header.row_count / rows_per_page) + (header.row_count % rows_per_page != 0);
 
     Page page;
-    fread(&page, sizeof(Page), 1, ptr);
 
-    // calculate rows per page (how much rows should exit in one page)
+    if (total_pages == 0) {
+        // Should not happen, but just in case
+        memset(&page, 0, sizeof(Page));
+        page.header.page_row_count = 0;
+        total_pages = 1;
+    }
 
-    int rows_per_page = (PAGE_SIZE - sizeof(PageHeader)) / sizeof(Row);
+    // Read last page
+    fseek(ptr, sizeof(DBHeader) + (total_pages - 1) * sizeof(Page), SEEK_SET);
+    if (fread(&page, sizeof(Page), 1, ptr) != 1) {
+        // If file ends here, create a new empty page
+        memset(&page, 0, sizeof(Page));
+        page.header.page_row_count = 0;
+    }
 
     if (page.header.page_row_count < rows_per_page) {
         // insert row in this page
         page.rows[page.header.page_row_count] = row;
         page.header.page_row_count++;
 
-        fseek(ptr, sizeof(DBHeader) + (total_pages_in_db_file -1) * sizeof(Page), SEEK_SET);
-        fwrite(&page, sizeof(Page), 1, ptr);
+        fseek(ptr, sizeof(DBHeader) + (total_pages -1) * sizeof(Page), SEEK_SET);
+         if (fwrite(&page, sizeof(Page), 1, ptr) != 1) {
+            perror("Failed to write page");
+            fclose(ptr);
+            exit(1);
+        }
     }else {
+        // create a new page
         memset(&page, 0, sizeof(Page));
         page.rows[0] = row;
         page.header.page_row_count = 1;
         fseek(ptr, 0, SEEK_END);
-        fwrite(&page, sizeof(Page), 1, ptr);
-        total_pages_in_db_file++;
+
+        if (fwrite(&page, sizeof(Page), 1, ptr) != 1) {
+            perror("Failed to write new page");
+            fclose(ptr);
+            exit(1);
+        }
+        total_pages++;
     }
 
+    // Update total row count in header
     header.row_count++;
     fseek(ptr, 0, SEEK_SET);
-    fwrite(&header, sizeof(DBHeader), 1, ptr);
+
+    if (fwrite(&header, sizeof(DBHeader), 1, ptr) != 1) {
+        perror("Failed to update DB header");
+        fclose(ptr);
+        exit(1);
+    }
     fclose(ptr);
 }
 
@@ -92,7 +121,12 @@ void select_all(const char* filename){
 
     DBHeader header;
 
-    fread(&header, sizeof(DBHeader), 1, ptr);
+     if (fread(&header, sizeof(DBHeader), 1, ptr) != 1) {
+        perror("Failed to read DB header");
+        fclose(ptr);
+        return;
+    }
+    
     if (header.magic != DB_MAGIC) {
         printf("Invalid database file \n");
         fclose(ptr);
@@ -100,16 +134,22 @@ void select_all(const char* filename){
     }
 
     int rows_per_page = (PAGE_SIZE - sizeof(PageHeader)) / sizeof(Row);
-    int total_pages_in_db_file = (header.row_count / rows_per_page) + (header.row_count % rows_per_page != 0);
+    int total_pages = (header.row_count / rows_per_page) + (header.row_count % rows_per_page != 0);
 
-    for (int i = 0; i < total_pages_in_db_file; i++) {
+    for (int i = 0; i < total_pages; i++) {
         Page page;
-        fread(&page, sizeof(Page), 1, ptr);
+        fseek(ptr, sizeof(DBHeader) + i * sizeof(Page), SEEK_SET);
+        if (fread(&page, sizeof(Page), 1, ptr) != 1) {
+            perror("Failed to read page");
+            fclose(ptr);
+            return;
+        }
 
         for (int j = 0; j < page.header.page_row_count; j++) {
             Row row = page.rows[j];
             printf("%d | %s | %d\n", row.id, row.name, row.age);
         }
     }
+
     fclose(ptr);
 }
